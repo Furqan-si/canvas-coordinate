@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Canvas Coordinate Editor</title>
+
+<style>
+  body {
+    font-family: sans-serif;
+    padding: 16px;
+  }
+  canvas {
+    border: 1px solid #333;
+    max-width: 100%;
+    touch-action: none;
+    cursor: crosshair;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 4px 0;
+    padding: 4px;
+  }
+  .row.selected {
+    background: #dbeafe;
+  }
+  input {
+    width: 80px;
+  }
+  button {
+    padding: 4px 8px;
+    cursor: pointer;
+  }
+  pre {
+    background: #f3f3f3;
+    padding: 8px;
+    max-height: 200px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  #copyStatus {
+    margin-left: 8px;
+    font-size: 0.9em;
+  }
+</style>
+</head>
+<body>
+
+<h3>Canvas Coordinate Editor</h3>
+<p>Upload gambar → klik / drag titik → edit → export / copy JSON</p>
+
+<input type="file" id="file" accept="image/*"><br><br>
+
+<canvas id="canvas"></canvas>
+
+<h4>Daftar Titik</h4>
+<div id="list"></div>
+
+<button id="export">Export JSON</button>
+<button id="copy">Copy JSON</button>
+<span id="copyStatus"></span>
+
+<h4>Output JSON</h4>
+<pre id="output"></pre>
+
+<script>
+const fileInput = document.getElementById("file")
+const canvas = document.getElementById("canvas")
+const ctx = canvas.getContext("2d")
+const list = document.getElementById("list")
+const output = document.getElementById("output")
+const copyBtn = document.getElementById("copy")
+const copyStatus = document.getElementById("copyStatus")
+
+let img = null
+const points = []
+let selectedIndex = null
+let dragging = false
+
+const HIT_RADIUS = 10
+
+fileInput.addEventListener("change", () => {
+  const file = fileInput.files[0]
+  if (!file) return
+
+  const reader = new FileReader()
+  reader.onload = () => {
+    img = new Image()
+    img.onload = () => {
+      canvas.width = img.naturalWidth
+      canvas.height = img.naturalHeight
+      points.length = 0
+      selectedIndex = null
+      output.textContent = ""
+      render()
+      updateList()
+    }
+    img.src = reader.result
+  }
+  reader.readAsDataURL(file)
+})
+
+// Render Canvas
+function render() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  if (!img) return
+
+  ctx.drawImage(img, 0, 0)
+
+  points.forEach((p, i) => {
+    const selected = i === selectedIndex
+
+    ctx.fillStyle = selected ? "blue" : "red"
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, selected ? 6 : 4, 0, Math.PI * 2)
+    ctx.fill()
+
+    ctx.fillStyle = "white"
+    ctx.font = "12px sans-serif"
+    ctx.textAlign = "center"
+    ctx.textBaseline = "middle"
+    ctx.fillText(i + 1, p.x, p.y)
+  })
+}
+
+function getPos(e) {
+  const rect = canvas.getBoundingClientRect()
+  const cx = e.touches ? e.touches[0].clientX : e.clientX
+  const cy = e.touches ? e.touches[0].clientY : e.clientY
+
+  return {
+    x: Math.round((cx - rect.left) * (canvas.width / rect.width)),
+    y: Math.round((cy - rect.top)  * (canvas.height / rect.height))
+  }
+}
+
+// Update List 
+function updateList() {
+  list.innerHTML = ""
+
+  points.forEach((p, i) => {
+    const row = document.createElement("div")
+    row.className = "row" + (i === selectedIndex ? " selected" : "")
+    row.innerHTML = `
+      #${i + 1}
+      X <input type="number" value="${p.x}">
+      Y <input type="number" value="${p.y}">
+      <button data-del>✕</button>
+    `
+
+    row.onclick = () => {
+      selectedIndex = i
+      render()
+      updateList()
+    }
+
+    const [xInput, yInput] = row.querySelectorAll("input")
+    const delBtn = row.querySelector("[data-del]")
+
+    // hentikan bubbling supaya input bisa diedit
+    xInput.onclick = e => e.stopPropagation()
+    yInput.onclick = e => e.stopPropagation()
+
+    xInput.oninput = e => {
+      p.x = Number(e.target.value)
+      render()
+    }
+
+    yInput.oninput = e => {
+      p.y = Number(e.target.value)
+      render()
+    }
+
+    delBtn.onclick = e => {
+      e.stopPropagation()
+      points.splice(i, 1)
+
+      if (selectedIndex === i) selectedIndex = null
+      else if (selectedIndex > i) selectedIndex--
+
+      render()
+      updateList()
+    }
+
+    list.appendChild(row)
+  })
+}
+
+// Mouse / Touch Handlers
+function onDown(e) {
+  if (!img) return
+  const { x, y } = getPos(e)
+
+  selectedIndex = null
+  points.forEach((p, i) => {
+    if (Math.hypot(p.x - x, p.y - y) < HIT_RADIUS) {
+      selectedIndex = i
+    }
+  })
+
+  if (selectedIndex !== null) {
+    dragging = true
+  } else {
+    points.push({ x, y })
+    selectedIndex = points.length - 1
+  }
+
+  render()
+  updateList()
+}
+
+function onMove(e) {
+  if (!dragging || selectedIndex === null) return
+  e.preventDefault()
+
+  const { x, y } = getPos(e)
+  points[selectedIndex].x = x
+  points[selectedIndex].y = y
+
+  render()
+  updateList()
+}
+
+function onUp() {
+  dragging = false
+}
+  
+canvas.addEventListener("mousedown", onDown)
+canvas.addEventListener("mousemove", onMove)
+canvas.addEventListener("mouseup", onUp)
+canvas.addEventListener("mouseleave", onUp)
+
+canvas.addEventListener("touchstart", onDown, { passive: false })
+canvas.addEventListener("touchmove", onMove, { passive: false })
+canvas.addEventListener("touchend", onUp)
+
+document.addEventListener("keydown", e => {
+  if (selectedIndex === null) return
+  if (e.key === "Delete" || e.key === "Backspace") {
+    points.splice(selectedIndex, 1)
+    selectedIndex = null
+    render()
+    updateList()
+  }
+})
+
+// ===============================
+// Export JSON
+// ===============================
+document.getElementById("export").onclick = () => {
+  const data = {
+    canvas: {
+      width: canvas.width,
+      height: canvas.height
+    },
+    points
+  }
+
+  const json = JSON.stringify(data, null, 2)
+  output.textContent = json
+
+  const blob = new Blob([json], { type: "application/json" })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = "koordinat.json"
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+copyBtn.onclick = async () => {
+  const text = output.textContent.trim()
+  if (!text) return
+
+  try {
+    await navigator.clipboard.writeText(text)
+    copyStatus.textContent = "✔ Copied"
+    setTimeout(() => copyStatus.textContent = "", 1500)
+  } catch {
+    copyStatus.textContent = "❌ Failed"
+  }
+}
+</script>
+
+</body>
+  </html>
